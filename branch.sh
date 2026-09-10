@@ -3,11 +3,24 @@
 # ============================================
 #  独立仓库批量创建脚本
 #  将当前代码复制为 N 份，每份初始化为独立的 Git 仓库并提交
+#  同时创建远程 GitHub 仓库并推送初始化代码
 #  用法：在主仓库目录运行，输入数量即可创建对应仓库
 # ============================================
 
 if ! git rev-parse --git-dir > /dev/null 2>&1; then
     echo "[ERROR] 当前目录不是 Git 仓库"
+    exit 1
+fi
+
+# 检查 gh CLI 是否可用
+if ! command -v gh &> /dev/null; then
+    echo "[ERROR] 未找到 gh CLI，请先安装并登录: https://cli.github.com/"
+    exit 1
+fi
+
+# 检查 gh 是否已登录
+if ! gh auth status &> /dev/null; then
+    echo "[ERROR] gh CLI 未登录，请先运行: gh auth login"
     exit 1
 fi
 
@@ -44,7 +57,7 @@ echo "将创建 $COUNT 个独立仓库："
 echo "============================================================"
 echo "  存放目录: ${TARGET_DIR}/"
 echo "  仓库命名: ${BASE_NAME}-1 ~ ${BASE_NAME}-${COUNT}"
-echo "  模式: 仅创建本地仓库"
+echo "  模式: 创建本地仓库 + 远程 GitHub 仓库"
 echo "============================================================"
 
 read -p "确认开始？[Y/n] " CONFIRM
@@ -96,7 +109,7 @@ for ((i=1; i<=COUNT; i++)); do
     # 初始化 Git 仓库并提交
     (
         cd "$NEW_DIR" || exit 1
-        git init -q
+        git init -q -b main
         git config user.email "agent@example.com"
         git config user.name "Agent"
         git add -A
@@ -109,9 +122,18 @@ for ((i=1; i<=COUNT; i++)); do
         continue
     fi
 
-    echo "✓ 仓库初始化成功（本地仓库）"
-
-    ((SUCCESS++))
+    # 创建远程 GitHub 仓库并推送
+    echo -n "✓ 本地仓库创建成功, 推送远程... "
+    if (
+        cd "$NEW_DIR" && \
+        gh repo create "$NEW_REPO" --public --source=. --push 2>/dev/null
+    ); then
+        echo "✓ 远程仓库创建并推送成功"
+        ((SUCCESS++))
+    else
+        echo "⚠ 远程仓库创建失败（本地仓库已创建，可手动推送）"
+        ((FAIL++))
+    fi
 done
 
 echo "============================================================"
@@ -122,6 +144,11 @@ for ((i=1; i<=COUNT; i++)); do
     NEW_REPO="${BASE_NAME}-${i}"
     NEW_DIR="${TARGET_DIR}/${NEW_REPO}"
     if [ -d "$NEW_DIR/.git" ]; then
-        echo "   $NEW_DIR/  (独立 Git 仓库)"
+        echo "   $NEW_DIR/  (本地仓库)"
+        # 检查是否有远程
+        if git -C "$NEW_DIR" remote get-url origin &>/dev/null; then
+            REMOTE="$(git -C "$NEW_DIR" remote get-url origin)"
+            echo "      └─ 远程: $REMOTE"
+        fi
     fi
 done
